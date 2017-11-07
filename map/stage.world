@@ -33,7 +33,7 @@ define robot position
 )
 
 # throw in a robot in the map
-robot( pose [ 125.0 90.0 0.0 0.0 ] name "robot" color "red")
+robot( pose [ 225.0 15.0 0.0 0.0 ] name "robot" color "red")
 
 #FloorPlan Properties
 define floorplan model

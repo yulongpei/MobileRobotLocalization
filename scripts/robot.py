@@ -1,4 +1,3 @@
-Author: YuLong Pei, Zizhou Zhai
 #!/usr/bin/env python
 
 import rospy
@@ -118,7 +117,7 @@ class Robot():
 		for i in range(self.map_width):
 			for j in range(self.map_height):
 				(col,row) = self.map.cell_position(j,i)
-				if(self.map.get_cell(col, row) == 1):
+				if (self.map.get_cell(col, row) == 1) and not self.is_inner_obstacle(i,j):
 					list_of_points.append((col,row))
 				list_of_query_points.append((col,row))
 
@@ -132,10 +131,7 @@ class Robot():
 				(col,row) = self.map.cell_position(j,i)
 				dist = self.likelihood_prob(dists[index],self.laser_sigma_hit)
 
-				if self.is_inner_obstacle(i,j):
-					self.map.set_cell(col,row,0)
-				else:
-					self.map.set_cell(col,row,dist)
+				self.map.set_cell(col,row,dist)
 				index += 1;
 		self.particlecloud_publisher.publish(self.pose_array)
 
@@ -172,7 +168,7 @@ class Robot():
 			self.ptotal = 0
 			if(particle.weight == 0):
 				continue;
-
+			will_del = 0
 
 			for laser_dist in self.recent_laser_results.ranges:
 				if(laser_dist > self.recent_laser_results.range_min and laser_dist < self.recent_laser_results.range_max):
@@ -185,12 +181,19 @@ class Robot():
 					if not (math.isnan(self.map.get_cell(x1,y1))):
 						pz = self.zhit*self.map.get_cell(x1,y1)+self.zrand
 						# sum pz into ptotal
-						self.ptotal += math.pow(pz,2)
+						self.ptotal += math.pow(pz,3)
+					elif math.isnan(self.map.get_cell(x1,y1)) or self.map.get_cell(x1,y1) == 0:
+						will_del = will_del + 1
+
 
 				self.current_angle += self.recent_laser_results.angle_increment
 
-			particle.weight = particle.weight* (1/(1+math.exp(-self.ptotal)))
-			self.normalize_sum += particle.weight
+			if will_del > 20:
+				particle.weight = 0
+			else:
+				particle.weight = particle.weight* (1/(1+math.exp(-self.ptotal)))
+				#particle.weight = particle.weight*self.ptotal
+				self.normalize_sum += particle.weight
 
 		totalsum = 0.0
 		for particle in self.particle_array:
@@ -211,7 +214,7 @@ class Robot():
 					particle_y = particle.y + random.gauss(0, self.config["resample_sigma_y"])
 					particle_theta = particle.theta + random.gauss(0, self.config["resample_sigma_angle"])
 					particle_pose = get_pose(particle_x, particle_y, particle_theta)
-					self.new_particle = Particle(particle_x, particle_y, particle_theta, 1./self.num_particles, particle_pose)
+					self.new_particle = Particle(particle_x, particle_y, particle_theta, particle.weight, particle_pose)
 					
 					self.new_particle_array.append(self.new_particle)
 					self.pose_array.poses.append(particle_pose)
@@ -267,16 +270,37 @@ class Robot():
 
 			self.reweight_particles();
 
+			self.ignore_low_weight();
+
 
 			self.resample_particles();
 
-			#self.particlecloud_publisher.publish(self.pose_array)
+			self.reweight_particles();
+
+			self.ignore_low_weight();
+
+
+			self.resample_particles();
+
+
+			self.particlecloud_publisher.publish(self.pose_array)
+
 
 
 		self.completed_moves += 1
 		self.particlecloud_publisher.publish(self.pose_array)
 
 
+	def ignore_low_weight(self):
+		weight_array = []
+		for particle in self.particle_array:
+			weight_array.append(particle.weight)
+		weight_array.sort()
+		index = (self.num_particles/10) -1
+		weight_threshold = weight_array[index]
+		for particle in self.particle_array:
+			if particle.weight <= weight_threshold:
+				particle.weight = 0;
 
 
 	def remove_out_of_bound(self):
@@ -320,29 +344,31 @@ class Robot():
 
 	def is_inner_obstacle(self, i,j):
 
+		threshold = 1
+
 		(col,row) = self.orig_map.cell_position(j,i)
 
-		if (math.isnan(self.orig_map.get_cell(col-4,row))):
+		if (math.isnan(self.orig_map.get_cell(col-threshold,row))):
 			return True
-		if (math.isnan(self.orig_map.get_cell(col+4,row))):
+		if (math.isnan(self.orig_map.get_cell(col+threshold,row))):
 			return True
-		if (math.isnan(self.orig_map.get_cell(col,row+4))):
+		if (math.isnan(self.orig_map.get_cell(col,row+threshold))):
 			return True
-		if (math.isnan(self.orig_map.get_cell(col,row-4))):
+		if (math.isnan(self.orig_map.get_cell(col,row-threshold))):
 			return True
 		if (math.isnan(self.orig_map.get_cell(col,row))):
 			return True
 
-		if (self.orig_map.get_cell(col-4,row) != 1):
+		if (self.orig_map.get_cell(col-threshold,row) != 1):
 			return False
 
-		if (self.orig_map.get_cell(col+4,row) != 1) :
+		if (self.orig_map.get_cell(col+threshold,row) != 1) :
 			return False
 
-		if (self.orig_map.get_cell(col,row+4) != 1) :
+		if (self.orig_map.get_cell(col,row+threshold) != 1) :
 			return False
 
-		if (self.orig_map.get_cell(col,row-4) != 1) :
+		if (self.orig_map.get_cell(col,row-threshold) != 1) :
 			return False
 
 		if (self.orig_map.get_cell(col,row) != 1) :
